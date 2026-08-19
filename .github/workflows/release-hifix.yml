@@ -19,9 +19,6 @@ jobs:
     runs-on: macos-26
     env:
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-      KEYCHAIN_PATH: ${{ runner.temp }}/hifix-signing.keychain-db
-      ARCHIVE_PATH: ${{ runner.temp }}/Ice-HiFix.zip
-      DERIVED_DATA_PATH: ${{ runner.temp }}/IceHiFixDerivedData
 
     steps:
       - name: Check out release source
@@ -41,6 +38,7 @@ jobs:
           CERTIFICATE_PATH="$RUNNER_TEMP/hifix-signing.p12"
           CERTIFICATE_PEM="$RUNNER_TEMP/hifix-signing.pem"
           printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$CERTIFICATE_PATH"
+          KEYCHAIN_PATH="$RUNNER_TEMP/hifix-signing.keychain-db"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
@@ -70,6 +68,7 @@ jobs:
 
       - name: Build release
         run: |
+          DERIVED_DATA_PATH="$RUNNER_TEMP/IceHiFixDerivedData"
           xcodebuild \
             -project Ice.xcodeproj \
             -scheme Ice \
@@ -79,6 +78,8 @@ jobs:
 
       - name: Verify and package application
         run: |
+          DERIVED_DATA_PATH="$RUNNER_TEMP/IceHiFixDerivedData"
+          ARCHIVE_PATH="$RUNNER_TEMP/Ice-HiFix.zip"
           APP_PATH="$DERIVED_DATA_PATH/Build/Products/Release/Ice-HiFix.app"
           codesign --verify --deep --strict --verbose=2 "$APP_PATH"
           test "$(codesign -dvv "$APP_PATH" 2>&1 | sed -n 's/^Authority=//p')" = \
@@ -90,6 +91,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ARCHIVE_PATH="$RUNNER_TEMP/Ice-HiFix.zip"
           gh release create "$RELEASE_TAG" \
             "$ARCHIVE_PATH" \
             "$ARCHIVE_PATH.sha256" \
@@ -99,4 +101,4 @@ jobs:
 
       - name: Remove temporary keychain
         if: always()
-        run: security delete-keychain "$KEYCHAIN_PATH" || true
+        run: security delete-keychain "$RUNNER_TEMP/hifix-signing.keychain-db" || true
