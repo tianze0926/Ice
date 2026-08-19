@@ -58,11 +58,11 @@ jobs:
             -nokeys \
             -passin "pass:$CERTIFICATE_PASSWORD" \
             -out "$CERTIFICATE_PEM"
-          security add-trusted-cert \
+          sudo security add-trusted-cert \
             -d \
             -r trustRoot \
             -p codeSign \
-            -k "$KEYCHAIN_PATH" \
+            -k /Library/Keychains/System.keychain \
             "$CERTIFICATE_PEM"
           security list-keychains -d user -s "$KEYCHAIN_PATH"
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
@@ -102,4 +102,8 @@ jobs:
 
       - name: Remove temporary keychain
         if: always()
-        run: security delete-keychain "$RUNNER_TEMP/hifix-signing.keychain-db" || true
+        run: |
+          sudo security delete-certificate \
+            -Z 8C9978A43950D795D48AE6D607142BE1B538C994 \
+            /Library/Keychains/System.keychain || true
+          security delete-keychain "$RUNNER_TEMP/hifix-signing.keychain-db" || true
