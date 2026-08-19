@@ -53,6 +53,7 @@ jobs:
             -k "$KEYCHAIN_PASSWORD" \
             "$KEYCHAIN_PATH"
           openssl pkcs12 \
+            -legacy \
             -in "$CERTIFICATE_PATH" \
             -nokeys \
             -passin "pass:$CERTIFICATE_PASSWORD" \
