@@ -137,14 +137,14 @@ extension MenuBarItemManager {
                     return
                 }
 
-                logger.info("Restoring Hi menu bar item to the visible section")
+                self.logger.info("Restoring Hi menu bar item to the visible section")
                 try await move(item: hiItem, to: .rightOfItem(controlItems.hidden))
                 await cacheActor.clearCachedItemWindowIDs()
                 await cacheItemsRegardless()
             } catch is CancellationError {
                 return
             } catch {
-                logger.error(
+                self?.logger.error(
                     "Failed to restore Hi menu bar item: \(error, privacy: .public)"
                 )
             }
