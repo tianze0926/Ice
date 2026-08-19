@@ -9,6 +9,11 @@ import SwiftUI
 /// Manager for app updates.
 @MainActor
 final class UpdatesManager: NSObject, ObservableObject {
+    /// Local Hi workaround builds must not use the official update feed.
+    private var updatesAreDisabled: Bool {
+        Bundle.main.bundleIdentifier == "com.tianze0926.IceHiFix"
+    }
+
     /// A Boolean value that indicates whether the user can check for updates.
     @Published var canCheckForUpdates = false
 
@@ -55,6 +60,9 @@ final class UpdatesManager: NSObject, ObservableObject {
     /// Performs the initial setup of the manager.
     func performSetup(with appState: AppState) {
         self.appState = appState
+        guard !updatesAreDisabled else {
+            return
+        }
         _ = updaterController
         configureCancellables()
     }
@@ -69,6 +77,9 @@ final class UpdatesManager: NSObject, ObservableObject {
 
     /// Checks for app updates.
     @objc func checkForUpdates() {
+        guard !updatesAreDisabled else {
+            return
+        }
         #if DEBUG
         // Checking for updates hangs in debug mode.
         let alert = NSAlert()

@@ -11,6 +11,9 @@ import Semaphore
 /// Manager for menu bar items.
 @MainActor
 final class MenuBarItemManager: ObservableObject {
+    /// The bundle identifier for Hi (formerly REDcity).
+    private static let hiBundleIdentifier = "com.electron.redcity"
+
     /// The current cache of menu bar items.
     @Published private(set) var itemCache = ItemCache(displayID: nil)
 
@@ -28,6 +31,10 @@ final class MenuBarItemManager: ObservableObject {
 
     /// A timer for rehiding temporarily shown menu bar items.
     private var rehideTimer: Timer?
+
+    /// A task that restores Hi's menu bar item after Hi recreates it
+    /// without a stable status item identifier.
+    private var hiVisibilityRestoreTask: Task<Void, Never>?
 
     /// Timestamp of the most recent menu bar item move operation.
     private var lastMoveOperationTimestamp: ContinuousClock.Instant?
@@ -93,6 +100,57 @@ final class MenuBarItemManager: ObservableObject {
 // MARK: - Item Cache
 
 extension MenuBarItemManager {
+    /// Schedules Hi's menu bar item to be moved into the visible section.
+    private func scheduleHiVisibilityRestore() {
+        guard hiVisibilityRestoreTask == nil else {
+            return
+        }
+
+        hiVisibilityRestoreTask = Task { [weak self] in
+            defer {
+                self?.hiVisibilityRestoreTask = nil
+            }
+
+            do {
+                // Hi may create its tray item more than once while launching.
+                try await Task.sleep(for: .seconds(1))
+                try Task.checkCancellation()
+
+                guard let self else {
+                    return
+                }
+
+                var items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
+                guard
+                    let controlItems = ControlItemPair(items: &items),
+                    let hiItem = items.first(where: {
+                        $0.sourceApplication?.bundleIdentifier == Self.hiBundleIdentifier
+                    })
+                else {
+                    return
+                }
+
+                let hiddenBounds = Bridging.getWindowBounds(for: controlItems.hidden.windowID) ??
+                controlItems.hidden.bounds
+                let hiBounds = Bridging.getWindowBounds(for: hiItem.windowID) ?? hiItem.bounds
+                guard hiBounds.minX < hiddenBounds.maxX else {
+                    return
+                }
+
+                logger.info("Restoring Hi menu bar item to the visible section")
+                try await move(item: hiItem, to: .rightOfItem(controlItems.hidden))
+                await cacheActor.clearCachedItemWindowIDs()
+                await cacheItemsRegardless()
+            } catch is CancellationError {
+                return
+            } catch {
+                logger.error(
+                    "Failed to restore Hi menu bar item: \(error, privacy: .public)"
+                )
+            }
+        }
+    }
+
     /// An actor that manages menu bar item cache operations.
     private final actor CacheActor {
         /// Stored task for the current cache operation.
@@ -356,6 +414,13 @@ extension MenuBarItemManager {
                 logger.warning("Missing control item for hidden section, clearing menu bar item cache")
                 itemCache = ItemCache(displayID: nil)
                 return
+            }
+
+            var context = CacheContext(controlItems: controlItems, displayID: displayID)
+            if let hiItem = items.first(where: {
+                $0.sourceApplication?.bundleIdentifier == Self.hiBundleIdentifier
+            }), context.findSection(for: hiItem) != .visible {
+                scheduleHiVisibilityRestore()
             }
 
             await enforceControlItemOrder(controlItems: controlItems)
