@@ -73,7 +73,9 @@ final class Listener {
         Logger.default.debug("Activating listener")
 
         do {
-            if #available(macOS 26.0, *) {
+            if Bundle.main.bundleIdentifier == "com.tianze0926.IceHiFix.MenuBarItemService" {
+                try uncheckedActivate()
+            } else if #available(macOS 26.0, *) {
                 try uncheckedActivateWithSameTeamRequirement()
             } else {
                 try uncheckedActivate()
