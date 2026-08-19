@@ -14,6 +14,10 @@ final class MenuBarItemManager: ObservableObject {
     /// The bundle identifier for Hi (formerly REDcity).
     private static let hiBundleIdentifier = "com.electron.redcity"
 
+    /// Defaults keys used to restore Hi relative to its former neighbors.
+    private static let hiRightAnchorKey = "IceHiFix.HiRightAnchor"
+    private static let hiLeftAnchorKey = "IceHiFix.HiLeftAnchor"
+
     /// The current cache of menu bar items.
     @Published private(set) var itemCache = ItemCache(displayID: nil)
 
@@ -100,6 +104,71 @@ final class MenuBarItemManager: ObservableObject {
 // MARK: - Item Cache
 
 extension MenuBarItemManager {
+    /// Saves the items immediately beside Hi while it is in the visible section.
+    private func rememberHiPosition(
+        _ hiItem: MenuBarItem,
+        among items: [MenuBarItem],
+        hiddenControlItem: MenuBarItem
+    ) {
+        let hiddenBounds = Bridging.getWindowBounds(for: hiddenControlItem.windowID) ??
+        hiddenControlItem.bounds
+        let hiBounds = Bridging.getWindowBounds(for: hiItem.windowID) ?? hiItem.bounds
+        guard hiBounds.minX >= hiddenBounds.maxX else {
+            return
+        }
+
+        let candidates = items.filter { item in
+            guard item.windowID != hiItem.windowID, !item.isControlItem else {
+                return false
+            }
+            let bounds = Bridging.getWindowBounds(for: item.windowID) ?? item.bounds
+            return bounds.minX >= hiddenBounds.maxX
+        }
+        let rightAnchor = candidates
+            .filter { (Bridging.getWindowBounds(for: $0.windowID) ?? $0.bounds).minX >= hiBounds.maxX }
+            .min { lhs, rhs in
+                let lhsBounds = Bridging.getWindowBounds(for: lhs.windowID) ?? lhs.bounds
+                let rhsBounds = Bridging.getWindowBounds(for: rhs.windowID) ?? rhs.bounds
+                return lhsBounds.minX < rhsBounds.minX
+            }
+        let leftAnchor = candidates
+            .filter { (Bridging.getWindowBounds(for: $0.windowID) ?? $0.bounds).maxX <= hiBounds.minX }
+            .max { lhs, rhs in
+                let lhsBounds = Bridging.getWindowBounds(for: lhs.windowID) ?? lhs.bounds
+                let rhsBounds = Bridging.getWindowBounds(for: rhs.windowID) ?? rhs.bounds
+                return lhsBounds.maxX < rhsBounds.maxX
+            }
+
+        UserDefaults.standard.set(rightAnchor?.tag.description, forKey: Self.hiRightAnchorKey)
+        UserDefaults.standard.set(leftAnchor?.tag.description, forKey: Self.hiLeftAnchorKey)
+    }
+
+    /// Returns Hi's saved destination, preferring the item formerly to its right.
+    private func savedHiDestination(
+        among items: [MenuBarItem],
+        hiddenControlItem: MenuBarItem
+    ) -> MoveDestination? {
+        let hiddenBounds = Bridging.getWindowBounds(for: hiddenControlItem.windowID) ??
+        hiddenControlItem.bounds
+        let visibleItems = items.filter { item in
+            let bounds = Bridging.getWindowBounds(for: item.windowID) ?? item.bounds
+            return bounds.minX >= hiddenBounds.maxX
+        }
+        if
+            let tag = UserDefaults.standard.string(forKey: Self.hiRightAnchorKey),
+            let anchor = visibleItems.first(where: { $0.tag.description == tag })
+        {
+            return .leftOfItem(anchor)
+        }
+        if
+            let tag = UserDefaults.standard.string(forKey: Self.hiLeftAnchorKey),
+            let anchor = visibleItems.first(where: { $0.tag.description == tag })
+        {
+            return .rightOfItem(anchor)
+        }
+        return nil
+    }
+
     /// Schedules Hi's menu bar item to be moved into the visible section.
     private func scheduleHiVisibilityRestore() {
         guard hiVisibilityRestoreTask == nil else {
@@ -137,8 +206,12 @@ extension MenuBarItemManager {
                     return
                 }
 
-                self.logger.info("Restoring Hi menu bar item to the visible section")
-                try await move(item: hiItem, to: .rightOfItem(controlItems.hidden))
+                let destination = savedHiDestination(
+                    among: items,
+                    hiddenControlItem: controlItems.hidden
+                ) ?? .rightOfItem(controlItems.hidden)
+                self.logger.info("Restoring Hi menu bar item to its saved visible position")
+                try await move(item: hiItem, to: destination)
                 await cacheActor.clearCachedItemWindowIDs()
                 await cacheItemsRegardless()
             } catch is CancellationError {
@@ -419,8 +492,12 @@ extension MenuBarItemManager {
             var context = CacheContext(controlItems: controlItems, displayID: displayID)
             if let hiItem = items.first(where: {
                 $0.sourceApplication?.bundleIdentifier == Self.hiBundleIdentifier
-            }), context.findSection(for: hiItem) != .visible {
-                scheduleHiVisibilityRestore()
+            }) {
+                if context.findSection(for: hiItem) == .visible {
+                    rememberHiPosition(hiItem, among: items, hiddenControlItem: controlItems.hidden)
+                } else {
+                    scheduleHiVisibilityRestore()
+                }
             }
 
             await enforceControlItemOrder(controlItems: controlItems)
